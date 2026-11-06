@@ -1,0 +1,235 @@
+
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>神社仏閣めぐり帖</title>
+<style>
+:root{--red:#a93627;--gold:#b18a42;--paper:#faf3e6}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:#503b30;font-family:system-ui,sans-serif}
+header{background:var(--red);color:white;padding:24px 16px;text-align:center;border-bottom:5px solid var(--gold)}
+header h1{margin:5px;font-size:25px}
+header small{color:#f6dfae}
+main{max-width:750px;margin:auto;padding:12px}
+nav{display:flex;gap:7px;overflow-x:auto;padding:12px 0}
+button{background:white;color:#693b30;border:1px solid #d9c5a8;border-radius:9px;padding:11px;cursor:pointer}
+nav button{white-space:nowrap}
+button.active,.primary{background:var(--red);color:white}
+section{background:#fffdf9;border:1px solid #e7d7bb;border-radius:14px;padding:16px;margin:12px 0}
+h2{color:var(--red);font-size:19px}
+label{display:block;margin:12px 0}
+input,select,textarea{display:block;width:100%;font:inherit;padding:11px;margin-top:5px;border:1px solid #d7c5aa;border-radius:8px}
+textarea{min-height:75px}
+article{border-top:1px solid #e8dac6;padding:12px 0}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.stat{background:#f6e9d5;text-align:center;padding:12px 3px;border-radius:9px}
+.stat strong{font-size:23px;color:var(--red)}
+.photo{max-width:100%;max-height:200px;border-radius:8px}
+.muted{font-size:13px;color:#806b59}
+a{color:var(--red)}
+</style>
+</head>
+<body>
+<header>
+<small>参拝の記憶を、一冊に。</small>
+<h1>⛩ 神社仏閣めぐり帖</h1>
+</header>
+<main>
+<nav id="nav"></nav>
+<div id="view"></div>
+</main>
+<script>
+const KEY="meguricho_data";
+const empty=()=>({visits:[],goshuin:[],charms:[],wishes:[]});
+let db;
+try{db=JSON.parse(localStorage.getItem(KEY))||empty()}
+catch{db=empty()}
+for(const k of Object.keys(empty()))
+if(!Array.isArray(db[k]))db[k]=[];
+let page="home";
+const tabs=[
+["home","ホーム"],["visits","参拝記録"],
+["goshuin","御朱印帳"],["charms","お守り・おみくじ"],
+["map","参拝マップ"],["calendar","カレンダー"],
+["stats","費用・統計"],["wishes","行きたい場所"],
+["backup","バックアップ"]];
+const $=id=>document.getElementById(id);
+const safe=s=>String(s??"").replace(/[&<>"']/g,c=>({
+"&":"&amp;","<":"&lt;",">":"&gt;",
+'"':"&quot;","'":"&#39;"}[c]));
+const money=n=>"¥"+Number(n||0).toLocaleString("ja-JP");
+const today=()=>new Date().toLocaleDateString("sv-SE");
+function save(){
+try{localStorage.setItem(KEY,JSON.stringify(db));return true}
+catch{alert("保存容量が不足しています。バックアップを取ってください。");return false}
+}
+function total(){
+return ["visits","goshuin","charms"].flatMap(k=>db[k])
+.reduce((n,x)=>n+Number(x.cost||0),0)
+}
+function go(p){page=p;render();window.scrollTo(0,0)}
+function form(k){
+let html=`<form id="entry">
+<label>日付<input name="date" type="date" value="${today()}" required></label>
+<label>神社・お寺の名前<input name="name" required></label>`;
+if(k==="visits")html+=`
+<label>住所<input name="address"></label>
+<label>参拝内容・感想<textarea name="memo"></textarea></label>`;
+if(k==="goshuin")html+=`
+<label>御朱印の種類<input name="detail"></label>
+<label>授与形式<select name="type">
+<option>直書き</option><option>書き置き</option></select></label>
+<label>御朱印帳の名前<input name="book"></label>`;
+if(k==="charms")html+=`
+<label>種類<select name="type">
+<option>お守り</option><option>おみくじ</option></select></label>
+<label>名称・吉凶<input name="detail"></label>
+<label>返納状況<select name="returned">
+<option>未返納</option><option>返納済み</option></select></label>`;
+if(k==="wishes")html+=`
+<label>住所<input name="address"></label>
+<label>優先度<select name="priority">
+<option>ぜひ行きたい</option><option>行きたい</option>
+<option>いつか行きたい</option></select></label>
+<label>メモ<textarea name="memo"></textarea></label>`;
+else html+=`
+<label>金額（円）<input name="cost" type="number" min="0" value="0"></label>`;
+if(k==="goshuin"||k==="charms")html+=`
+<label>写真<input name="photo" type="file" accept="image/*"></label>`;
+return html+`<button class="primary">保存する</button></form>`;
+}
+function list(k){
+return [...db[k]].sort((a,b)=>b.date.localeCompare(a.date))
+.map(x=>`<article>
+<b>${safe(x.name)}</b>
+<p class="muted">${safe(x.date)} ${safe(x.type||"")}
+${safe(x.detail||"")} ${safe(x.priority||"")}</p>
+<p>${safe(x.address||"")} ${safe(x.memo||"")}</p>
+${x.photo?`<img class="photo" src="${x.photo}" alt="記録写真">`:""}
+${x.cost?`<p>${money(x.cost)}</p>`:""}
+<button onclick="del('${k}','${x.id}')">削除</button>
+</article>`).join("")||"<p>まだ記録がありません。</p>";
+}
+function render(){
+$("nav").innerHTML=tabs.map(([id,name])=>
+`<button class="${page===id?"active":""}" onclick="go('${id}')">${name}</button>`).join("");
+let h="";
+if(page==="home"){
+h=`<section><h2>私の参拝記録</h2><div class="stats">
+<div class="stat"><strong>${db.visits.length}</strong><br>参拝</div>
+<div class="stat"><strong>${db.goshuin.length}</strong><br>御朱印</div>
+<div class="stat"><strong>${new Set(db.visits.map(x=>x.name)).size}</strong><br>訪問寺社</div>
+</div><p>記録した費用：${money(total())}</p>
+<button class="primary" onclick="go('visits')">＋ 参拝を記録</button></section>`;
+}
+if(["visits","goshuin","charms","wishes"].includes(page)){
+const names={visits:"参拝記録",goshuin:"御朱印帳",
+charms:"お守り・おみくじ",wishes:"行きたい場所"};
+h=`<section><h2>${names[page]}を追加</h2>${form(page)}</section>
+<section><h2>登録一覧</h2>${list(page)}</section>`;
+}
+if(page==="calendar"){
+h=`<section><h2>参拝カレンダー</h2>
+<p>参拝日ごとの記録</p>
+${[...db.visits].sort((a,b)=>b.date.localeCompare(a.date))
+.map(x=>`<article>${safe(x.date)}　${safe(x.name)}</article>`).join("")||"記録なし"}
+</section>`;
+}
+if(page==="map"){
+h=`<section><h2>参拝マップ</h2>
+<p>登録した寺社をGoogleマップで検索できます。</p>
+${[...db.visits,...db.wishes].map(x=>`<article>
+<b>${safe(x.name)}</b><p>${safe(x.address||"")}</p>
+<a target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(x.name+" "+(x.address||""))}">地図を開く</a>
+</article>`).join("")||"登録なし"}</section>`;
+}
+if(page==="stats"){
+h=`<section><h2>費用・統計</h2>
+<p>参拝回数：${db.visits.length}回</p>
+<p>御朱印：${db.goshuin.length}件</p>
+<p>お守り・おみくじ：${db.charms.length}件</p>
+<h2>合計 ${money(total())}</h2></section>`;
+}
+if(page==="backup"){
+h=`<section><h2>バックアップ</h2>
+<p>記録をJSON形式で保存・復元できます。</p>
+<button onclick="backup()">バックアップを保存</button>
+<label>バックアップファイルを選択
+<input type="file" id="restoreFile" accept=".json"></label>
+<button onclick="restore()">データを復元</button>
+<p class="muted">復元すると現在の記録が置き換わります。</p>
+<button onclick="csv()">CSVを出力</button></section>`;
+}
+$("view").innerHTML=h;
+const f=$("entry");
+if(f)f.addEventListener("submit",submit);
+}
+async function submit(e){
+e.preventDefault();
+const k=page;
+const f=e.target;
+let x=Object.fromEntries(new FormData(f).entries());
+x.id=String(Date.now());
+if(x.photo instanceof File){
+const file=x.photo;
+delete x.photo;
+if(file.size){
+if(file.size>300000){
+alert("写真は300KB以下に圧縮してください。");return;
+}
+x.photo=await new Promise(resolve=>{
+const r=new FileReader();
+r.onload=()=>resolve(r.result);
+r.readAsDataURL(file);
+});
+}}
+db[k].push(x);
+if(!save())db[k].pop();
+else{alert("記録を保存しました");render()}
+}
+function del(k,id){
+if(confirm("この記録を削除しますか？")){
+db[k]=db[k].filter(x=>x.id!==id);
+save();render();
+}}
+function download(data,name,type){
+const blob=new Blob([data],{type});
+const url=URL.createObjectURL(blob);
+const a=document.createElement("a");
+a.href=url;a.download=name;a.click();
+setTimeout(()=>URL.revokeObjectURL(url),2000);
+}
+function backup(){
+download(JSON.stringify(db,null,2),
+"meguricho-backup.json","application/json");
+}
+async function restore(){
+const f=$("restoreFile").files[0];
+if(!f)return alert("ファイルを選んでください");
+try{
+const d=JSON.parse(await f.text());
+if(!Object.keys(empty()).every(k=>Array.isArray(d[k])))
+throw Error("形式が違います");
+if(confirm("現在の記録を置き換えますか？")){
+const old=db;db=d;
+if(!save())db=old;
+render();
+}
+}catch{alert("正しいバックアップファイルではありません")}
+}
+function csv(){
+let rows=[["分類","日付","寺社名","費用","内容"]];
+for(const k of Object.keys(db))
+for(const x of db[k])
+rows.push([k,x.date,x.name,x.cost||0,x.memo||x.detail||""]);
+const content="\ufeff"+rows.map(r=>
+r.map(v=>'"'+String(v??"").replace(/"/g,'""')+'"').join(",")
+).join("\r\n");
+download(content,"meguricho.csv","text/csv;charset=utf-8");
+}
+render();
+</script>
+</body>
+</html>
